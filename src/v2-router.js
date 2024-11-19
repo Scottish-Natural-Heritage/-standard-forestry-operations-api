@@ -72,51 +72,102 @@ const calculateExpiryDate = () => {
 };
 
 /**
- * Clean the incoming POST request body to make it more compatible with the
- * database and its validation rules.
+ * Validate the incoming POST request body to make sure it is compatible with the
+ * database and data model.
  *
- * @param {any} newAppId The ID we deemed suitable for the application.
  * @param {any} body The incoming request's body.
  * @returns {any} A json object that's just got our cleaned up fields on it.
  */
 const cleanAppInput = (body) => {
+  // Ensure required fields are present and of the expected type.
+  if (
+    [
+      typeof body.convictions !== Boolean.name.toLowerCase(),
+      typeof body.complyWithTerms !== Boolean.name.toLowerCase(),
+      typeof body.fullName !== String.name.toLowerCase(),
+      body.fullName === '',
+      typeof body.addressLine1 !== String.name.toLowerCase(),
+      body.addressLine1 === '',
+      typeof body.addressTown !== String.name.toLowerCase(),
+      body.addressTown === '',
+      typeof body.addressPostcode !== String.name.toLowerCase(),
+      body.addressPostcode === '',
+      typeof body.phoneNumber !== String.name.toLowerCase(),
+      body.phoneNumber === '',
+      typeof body.emailAddress !== String.name.toLowerCase(),
+      body.emailAddress === '',
+      !Array.isArray(body.setts)
+    ].some(Boolean)
+  ) {
+    throw new Error('Invalid data');
+  }
+
+  for (const sett of body.setts) {
+    if (
+      [
+        typeof sett.id !== String.name.toLowerCase(),
+        sett.id === '',
+        typeof sett.gridReference !== String.name.toLowerCase(),
+        sett.gridReference === '',
+        typeof sett.entrances !== Number.name.toLowerCase()
+      ].some(Boolean)
+    ) {
+      throw new Error('Invalid data');
+    }
+  }
+
+  // Ensure optional fields are of the expected type if present.
+  if (
+    [
+      body.companyOrganisation && typeof body.companyOrganisation !== String.name.toLowerCase(),
+      body.addressLine2 && typeof body.addressLine2 !== String.name.toLowerCase(),
+      body.addressCounty && typeof body.addressCounty !== String.name.toLowerCase(),
+      body.createdByLicensingOfficer && typeof body.createdByLicensingOfficer !== String.name.toLowerCase(),
+      body.uprn && typeof body.uprn !== String.name.toLowerCase()
+    ].some(Boolean)
+  ) {
+    throw new Error('Invalid data');
+  }
+
+  for (const sett of body.setts) {
+    if (sett.createdByLicensingOfficer && typeof sett.createdByLicensingOfficer !== String.name.toLowerCase()) {
+      throw new Error('Invalid data');
+    }
+  }
+
   return {
     // The booleans are just copied across.
     convictions: body.convictions,
     complyWithTerms: body.complyWithTerms,
 
-    // The strings are trimmed for leading and trailing whitespace and then
-    // copied across if they're in the POST body or are set to undefined if
-    // they're missing.
-    fullName: body.fullName === undefined ? undefined : body.fullName.trim(),
-    companyOrganisation: body.companyOrganisation === undefined ? undefined : body.companyOrganisation.trim(),
-    addressLine1: body.addressLine1 === undefined ? undefined : body.addressLine1.trim(),
-    addressLine2: body.addressLine2 === undefined ? undefined : body.addressLine2.trim(),
-    addressTown: body.addressTown === undefined ? undefined : body.addressTown.trim(),
-    addressCounty: body.addressCounty === undefined ? undefined : body.addressCounty.trim(),
-    addressPostcode: body.addressPostcode === undefined ? undefined : body.addressPostcode.trim(),
-    phoneNumber: body.phoneNumber === undefined ? undefined : body.phoneNumber.trim(),
-    emailAddress: body.emailAddress === undefined ? undefined : body.emailAddress.trim(),
-    createdByLicensingOfficer: body.createdByLicensingOfficer,
+    // Required string fields are trimmed
+    // and optional string fields are trimmed if present
+    // or set to undefined if missing.
+    fullName: body.fullName.trim(),
+    companyOrganisation: body.companyOrganisation ? body.companyOrganisation.trim() : undefined,
+    addressLine1: body.addressLine1.trim(),
+    addressLine2: body.addressLine2 ? body.addressLine2.trim() : undefined,
+    addressTown: body.addressTown.trim(),
+    addressCounty: body.addressCounty.trim(),
+    addressPostcode: body.addressPostcode.trim(),
+    phoneNumber: body.phoneNumber.trim(),
+    emailAddress: body.emailAddress.trim(),
+    createdByLicensingOfficer: body.createdByLicensingOfficer ? body.createdByLicensingOfficer.trim() : undefined,
     expiryDate: calculateExpiryDate(),
-    uprn: body.uprn === undefined ? undefined : body.uprn,
+    uprn: body.uprn ? body.uprn.trim() : undefined,
 
-    // We copy across the setts, cleaning them as we go.
-    setts:
-      body.setts === undefined
-        ? undefined
-        : body.setts.map((sett) => {
-            return {
-              // The number is just copied across.
-              entrances: sett.entrances,
+    // Trim the string fields for each sett.
+    setts: body.setts.map((sett) => {
+      return {
+        // The number is just copied across.
+        entrances: sett.entrances,
 
-              // The three strings are trimmed then copied.
-              id: sett.id === undefined ? undefined : sett.id.trim(),
-              gridReference: sett.gridReference === undefined ? undefined : sett.gridReference.trim(),
-              createdByLicensingOfficer:
-                sett.createdByLicensingOfficer === undefined ? undefined : sett.createdByLicensingOfficer.trim()
-            };
-          })
+        // The three strings are trimmed then copied.
+        id: sett.id === sett.id.trim(),
+        gridReference: sett.gridReference === sett.gridReference.trim(),
+        createdByLicensingOfficer: sett.createdByLicensingOfficer ? sett.createdByLicensingOfficer.trim() : undefined
+      };
+    })
   };
 };
 
@@ -124,24 +175,29 @@ const cleanAppInput = (body) => {
  * Creates a new application.
  */
 v2router.post('/applications', async (request, response) => {
+  let sfoApplication;
   try {
+    // Clean up the user's input before we store it in the database.
+    sfoApplication = cleanAppInput(request.body);
+  } catch {
+    return response.status(400).send({message: `Could not create application. Invalid data submitted`});
+  }
+
+  try {
+    // Create a new id wrapped in a database transaction
+    const newId = await ApplicationController.create(sfoApplication);
+
+    // If we were not able to create the new application then we need to respond with a 500 error.
+    if (newId === undefined) {
+      return response.status(500).send({message: `Could not create application.`});
+    }
+
     // Create baseUrl.
     const baseUrl = new URL(
       `${request.protocol}://${request.hostname}:${config.port}${request.originalUrl}${
         request.originalUrl.endsWith('/') ? '' : '/'
       }`
     );
-
-    // Clean up the user's input before we store it in the database.
-    const cleanObject = cleanAppInput(request.body);
-
-    // Create a new id wrapped in a database transaction
-    const newId = await ApplicationController.create(cleanObject);
-
-    // If we were not able to create the new application then we need to respond with a 500 error.
-    if (newId === undefined) {
-      return response.status(500).send({message: `Could not create application.`});
-    }
 
     // Return the new location of the newly created application.
     return response.status(201).location(new URL(newId, baseUrl)).send();
@@ -180,12 +236,6 @@ v2router.post('/applications/:id/setts', async (request, response) => {
       return response.status(404).send({message: `Application ${request.params.id} not valid.`});
     }
 
-    const baseUrl = new URL(
-      `${request.protocol}://${request.hostname}:${config.port}${request.originalUrl}${
-        request.originalUrl.endsWith('/') ? '' : '/'
-      }`
-    );
-
     // Clean up the user's input before we store it in the database.
     const cleanObject = cleanSettInput(existingId, request.body);
 
@@ -195,6 +245,12 @@ v2router.post('/applications/:id/setts', async (request, response) => {
     if (newId === undefined) {
       return response.status(500).send({message: `Could not create sett for license ${existingId}.`});
     }
+
+    const baseUrl = new URL(
+      `${request.protocol}://${request.hostname}:${config.port}${request.originalUrl}${
+        request.originalUrl.endsWith('/') ? '' : '/'
+      }`
+    );
 
     return response.status(201).location(new URL(newId, baseUrl)).send();
   } catch (error) {
@@ -230,12 +286,6 @@ v2router.post('/applications/:id/notes', async (request, response) => {
       return response.status(404).send({message: `Application ${request.params.id} not valid.`});
     }
 
-    const baseUrl = new URL(
-      `${request.protocol}://${request.hostname}:${config.port}${request.originalUrl}${
-        request.originalUrl.endsWith('/') ? '' : '/'
-      }`
-    );
-
     // Check if there's a application allocated at the specified ID.
     const existingApplication = await ApplicationController.findOne(existingId);
     if (existingApplication === undefined || existingApplication === null) {
@@ -251,6 +301,12 @@ v2router.post('/applications/:id/notes', async (request, response) => {
     if (newNote === undefined) {
       return response.status(500).send({message: `Could not create note for licence ${existingId}.`});
     }
+
+    const baseUrl = new URL(
+      `${request.protocol}://${request.hostname}:${config.port}${request.originalUrl}${
+        request.originalUrl.endsWith('/') ? '' : '/'
+      }`
+    );
 
     return response.status(201).location(new URL(newNote, baseUrl)).send();
   } catch (error) {
