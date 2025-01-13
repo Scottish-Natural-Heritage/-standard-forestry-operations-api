@@ -8,6 +8,7 @@ import Note from './note.js';
 import Returns from './returns.js';
 import OldReturns from './old-returns.js';
 import SettPhotos from './sett-photos.js';
+import TestMigration from './test-migration.js';
 
 const sequelize = new Sequelize(databaseConfig.database);
 
@@ -20,7 +21,8 @@ const database = {
   Revocation: Revocation(sequelize),
   Returns: Returns(sequelize),
   OldReturns: OldReturns(sequelize),
-  SettPhotos: SettPhotos(sequelize)
+  SettPhotos: SettPhotos(sequelize),
+  TestMigration: TestMigration(sequelize)
 };
 
 database.Application.hasMany(database.Sett);

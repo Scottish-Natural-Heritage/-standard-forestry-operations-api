@@ -10,6 +10,7 @@ import jsonConsoleLogger, {unErrorJson} from './json-console-logger.js';
 import config from './config/app.js';
 import {EmailService} from './services/email-service.js';
 import jwk from './config/jwk.js';
+import TestMigrationController from './controllers/v2/test-migration.js';
 
 const v2router = express.Router();
 
@@ -683,6 +684,39 @@ v2router.get('/applications/:id/login', async (request, response) => {
     token,
     loginLink
   });
+});
+
+/**
+ * GET Test endpoint.
+ */
+v2router.get('/test-migrations', async (request, response) => {
+  try {
+    const testMigrations = await TestMigrationController.findAll();
+
+    return response.status(200).send(testMigrations);
+  } catch (error) {
+    jsonConsoleLogger.error(unErrorJson(error));
+    return response.status(500).send({error});
+  }
+});
+
+/**
+ * POST Test endpoint.
+ */
+v2router.post('/test-migrations', async (request, response) => {
+  try {
+    const testMigration = request.body;
+
+    const newTestMigration = await TestMigrationController.create(testMigration);
+
+    if (newTestMigration === undefined) {
+      return response.status(500).send({message: `Could not create newTestMigration`});
+    }
+
+    return response.status(201).send({message: 'Test Write To DB Succeeded'});
+  } catch (error) {
+    return response.status(500).send({error});
+  }
 });
 
 // Allow an API consumer to retrieve the public half of our ECDSA key to
